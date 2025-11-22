@@ -1,12 +1,23 @@
 {
-  "name": "link-bypasser",
+  "name": "link-bypass-server",
+  "version": "1.0.0",
   "type": "module",
+  "description": "Link bypass server with Puppeteer",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^24.15.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "ua-parser-js": "^1.0.37"
-  }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["bypass", "puppeteer", "express"],
+  "author": "",
+  "license": "MIT"
 }
