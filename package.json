@@ -1,7 +1,12 @@
 {
+  "name": "link-bypasser",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "puppeteer-core": "^24.15.0",
     "express": "^4.18.2",
+    "puppeteer": "^21.11.0",
     "ua-parser-js": "^1.0.37"
   }
 }
