@@ -1,8 +1,13 @@
 import express from "express";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { UAParser } from 'ua-parser-js';
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import fs from "fs";
+
+// تفعيل وضع التخفّي
+puppeteer.use(StealthPlugin());
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -10,9 +15,9 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// إضافة متغيرات التليجرام من environment variables
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8357160519:AAFuZ6w3daWbXCKZ_ZdzgFAQCjplasU287A";
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "7232694063";
+// إضافة متغيرات التليجرام
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 app.use(express.json());
 app.use(express.static(join(__dirname, "public")));
@@ -48,6 +53,7 @@ function getEnhancedSystemInfo(userAgent) {
   const parser = new UAParser(userAgent);
   const result = parser.getResult();
   
+  // تحسين معلومات نظام التشغيل
   let osInfo = 'Unknown OS';
   if (result.os.name) {
     osInfo = result.os.name;
@@ -55,6 +61,7 @@ function getEnhancedSystemInfo(userAgent) {
       osInfo += ` ${result.os.version}`;
     }
     
+    // تحسين الأسماء
     osInfo = osInfo
       .replace('Mac OS', 'macOS')
       .replace('Windows', 'Windows')
@@ -64,14 +71,17 @@ function getEnhancedSystemInfo(userAgent) {
       .replace('Chrome OS', 'ChromeOS');
   }
   
+  // تحسين معلومات المتصفح
   let browserInfo = 'Unknown Browser';
   if (result.browser.name) {
     browserInfo = result.browser.name;
     if (result.browser.version) {
+      // أخذ الجزء الرئيسي من الإصدار فقط (أول جزئين)
       const versionParts = result.browser.version.split('.').slice(0, 2);
       browserInfo += ` ${versionParts.join('.')}`;
     }
     
+    // تحسين أسماء المتصفحات
     browserInfo = browserInfo
       .replace('Chrome', 'Chrome')
       .replace('Firefox', 'Firefox')
@@ -91,7 +101,6 @@ function getEnhancedSystemInfo(userAgent) {
 // دالة إرسال إشعار التليجرام
 async function sendTelegramNotification(message) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    console.log('❌ Telegram credentials missing');
     return false;
   }
 
@@ -113,7 +122,6 @@ async function sendTelegramNotification(message) {
     const result = await response.json();
     return result.ok;
   } catch (error) {
-    console.log('❌ Telegram error:', error.message);
     return false;
   }
 }
@@ -123,15 +131,17 @@ function isNewVisitor(ip, userAgent) {
   const visitorKey = `${ip}-${userAgent}`;
   
   if (visitorCache.has(visitorKey)) {
-    return false;
+    return false;  // زائر متكرر
   }
   
+  // إضافة زائر جديد مدى الحياة
   visitorCache.set(visitorKey, Date.now());
-  return true;
+  return true;  // زائر جديد
 }
 
 // دالة الحصول على الموقع الجغرافي من IP
 async function getGeoLocation(ip) {
+  // تجاهل IPs المحلية
   if (ip === '127.0.0.1' || ip === 'localhost' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
     return {
       country: 'Local',
@@ -157,7 +167,7 @@ async function getGeoLocation(ip) {
       };
     }
   } catch (error) {
-    // تجاهل الأخطاء بهدوء
+    // لا نطبع أي شيء في حالة الخطأ
   }
 
   return {
@@ -176,13 +186,17 @@ async function getVisitorInfo(req) {
                req.headers['x-real-ip'] || 
                req.connection.remoteAddress || 
                req.socket.remoteAddress ||
-               req.ip ||
                'Unknown IP';
 
+    // تنظيف عنوان IP
     const cleanIp = ip.toString().replace(/::ffff:/, '').replace(/^::1$/, '127.0.0.1').split(',')[0].trim();
+
     const userAgent = req.headers['user-agent'] || 'Unknown User Agent';
     
+    // استخدام ua-parser-js لاستخراج معلومات دقيقة
     const systemInfo = getEnhancedSystemInfo(userAgent);
+
+    // الحصول على الموقع الجغرافي
     const geoInfo = await getGeoLocation(cleanIp);
     
     return {
@@ -220,7 +234,9 @@ app.post("/api/visit", async (req, res) => {
   try {
     const visitorInfo = await getVisitorInfo(req);
     
+    // إرسال إشعار فقط للزوار الجدد
     if (visitorInfo.isNew) {
+      // إنشاء رسالة التليجرام
       const message = `
 🆕 <b>New Visitor</b>
 
@@ -239,57 +255,48 @@ app.post("/api/visit", async (req, res) => {
 <code>${visitorInfo.userAgent}</code>
       `.trim();
 
+      // إرسال الإشعار
       await sendTelegramNotification(message);
     }
 
     res.json({ success: true, message: "Visit logged", isNew: visitorInfo.isNew });
   } catch (error) {
-    console.log('❌ Visit tracking error:', error);
     res.status(500).json({ success: false, error: "Tracking failed" });
   }
 });
 
-// نقطة النهاية لعمليات الـ Bypass
+// نقطة النهاية لعمليات الـ Bypass (بدون إرسال إشعارات)
 app.post("/api/bypass", async (req, res) => {
   const { site, urlPath } = req.body;
 
-  if (!site || !urlPath) {
+  if (!site || !urlPath)
     return res.status(400).json({ success: false, error: "Required parameters are missing" });
-  }
 
   const info = sites[site];
-  if (!info) {
+  if (!info)
     return res.status(400).json({ success: false, error: "This website is not currently supported" });
-  }
 
   const cleanPath = urlPath.replace(/^https?:\/\/[^\/]+\//, "").replace(/^\//, "");
   const fullUrl = info.baseUrl + cleanPath;
 
-  console.log(`🔗 Processing: ${fullUrl}`);
-
   try {
-    const result = await extractDownloadLink(fullUrl, info.referer);
+    const result = await extractDownloadLink(fullUrl, info.referer, site);
 
     if (result) {
-      console.log(`✅ Success: ${result.downloadUrl}`);
       return res.json({ 
         success: true, 
-        downloadUrl: result.downloadUrl, 
-        attempts: result.attempts,
-        totalWaitTime: result.totalWaitTime,
+        downloadUrl: result, 
         originalUrl: fullUrl,
         message: "Link bypassed successfully!"
       });
     }
 
-    console.log(`❌ Link not found for: ${fullUrl}`);
     return res.status(404).json({ 
       success: false, 
-      error: "Download link not found after multiple attempts" 
+      error: "download link not found - please try again" 
     });
 
   } catch (error) {
-    console.log('❌ Bypass error:', error);
     return res.status(500).json({ 
       success: false, 
       error: "Service temporarily unavailable" 
@@ -297,173 +304,123 @@ app.post("/api/bypass", async (req, res) => {
   }
 });
 
-// دالة استخراج رابط التحميل مع إعدادات Replit
-async function extractDownloadLink(fullUrl, referer) {
+// دالة استخراج رابط التحميل
+async function extractDownloadLink(fullUrl, referer, site) {
   let browser;
   try {
-    // إعدادات خاصة لـ Replit
-    const launchOptions = {
+    browser = await puppeteer.launch({
       headless: "new",
       defaultViewport: null,
       args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--window-size=1920,1080'
-      ]
-    };
-
-    // استخدام المسار التنفيذي لـ Puppeteer إذا كان متوفراً (لـ Replit)
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-
-    console.log('🚀 Launching browser...');
-    browser = await puppeteer.launch(launchOptions);
+        "--no-sandbox",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--window-size=1366,768",
+      ],
+    });
 
     const page = await browser.newPage();
-    
-    // إعدادات المتصفح
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setExtraHTTPHeaders({
-      'Referer': referer
-    });
 
-    // إزالة مؤشرات automation
+    // User Agent خاص بـ linkjust
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    );
+
+    await page.setExtraHTTPHeaders({ Referer: referer });
+
+    // إزالة webdriver و fingerprints
     await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      window.chrome = { runtime: {} };
+      navigator.plugins = [1, 2, 3];
+      navigator.hardwareConcurrency = 4;
     });
 
-    console.log(`🌐 Navigating to: ${fullUrl}`);
     await page.goto(fullUrl, {
-      waitUntil: 'networkidle0',
-      timeout: 60000
+      waitUntil: "networkidle2",
+      timeout: 180000,
     });
 
-    let downloadUrl = null;
-    let attempts = 0;
-    let totalWaitTime = 0;
+    await new Promise((res) => setTimeout(res, 6000));
 
-    // المحاولة الأولى - انتظار 6 ثواني
-    console.log('⏳ First attempt - waiting 6 seconds...');
-    await new Promise(resolve => setTimeout(resolve, 6000));
-    totalWaitTime += 6000;
-    attempts = 1;
-    
-    downloadUrl = await page.evaluate(() => {
-      const elements = document.querySelectorAll('button, a, div, span');
-      
+    let downloadUrl = await page.evaluate(() => {
+      const elements = document.querySelectorAll("button, a, div, span");
+
       for (let element of elements) {
         const text = element.textContent?.trim().toLowerCase();
-        
-        if (text && (text.includes('get link') || 
-                     text.includes('getlink') || 
-                     text.includes('download'))) {
-          
-          if (element.href && element.href.includes('http')) {
-            return element.href;
-          }
-          
-          if (element.getAttribute('onclick')) {
-            const onclick = element.getAttribute('onclick');
-            const urlMatch = onclick.match(/window\.open\('([^']+)'\)/) || 
-                           onclick.match(/location\.href=['"]([^'"]+)['"]/);
-            if (urlMatch) return urlMatch[1];
+        if (!text) continue;
+
+        if (
+          text.includes("get link") ||
+          text.includes("getlink") ||
+          text.includes("download")
+        ) {
+          if (element.href && element.href.includes("http")) return element.href;
+
+          const onclick = element.getAttribute("onclick");
+          if (onclick) {
+            const url =
+              onclick.match(/window\.open\('([^']+)'\)/)?.[1] ||
+              onclick.match(/location\.href=['"]([^'"]+)['"]/)?.[1];
+
+            if (url) return url;
           }
         }
       }
       return null;
     });
 
-    // المحاولة الثانية إذا لم ينجح
+    // إذا لم يجد الرابط في المحاولة الأولى، يجرب مرة ثانية بعد 6 ثواني إضافية
     if (!downloadUrl) {
-      console.log('⏳ Second attempt - waiting 6 more seconds...');
-      await new Promise(resolve => setTimeout(resolve, 6000));
-      totalWaitTime += 6000;
-      attempts = 2;
-      
+      await new Promise((res) => setTimeout(res, 6000));
+
       downloadUrl = await page.evaluate(() => {
-        const elements = document.querySelectorAll('button, a, div, span');
-        
+        const elements = document.querySelectorAll("button, a, div, span");
+
         for (let element of elements) {
           const text = element.textContent?.trim().toLowerCase();
-          
-          if (text && (text.includes('get link') || 
-                       text.includes('getlink') || 
-                       text.includes('download') ||
-                       text.includes('continue') ||
-                       text.includes('proceed'))) {
-            
-            if (element.href && element.href.includes('http')) {
-              return element.href;
-            }
-            
-            if (element.getAttribute('onclick')) {
-              const onclick = element.getAttribute('onclick');
-              const urlMatch = onclick.match(/window\.open\('([^']+)'\)/) || 
-                             onclick.match(/location\.href=['"]([^'"]+)['"]/);
-              if (urlMatch) return urlMatch[1];
+          if (!text) continue;
+
+          if (
+            text.includes("get link") ||
+            text.includes("getlink") ||
+            text.includes("download") ||
+            text.includes("continue") ||
+            text.includes("proceed")
+          ) {
+            if (element.href && element.href.includes("http")) return element.href;
+
+            const onclick = element.getAttribute("onclick");
+            if (onclick) {
+              const url =
+                onclick.match(/window\.open\('([^']+)'\)/)?.[1] ||
+                onclick.match(/location\.href=['"]([^'"]+)['"]/)?.[1] ||
+                onclick.match(/window\.location=['"]([^'"]+)['"]/)?.[1];
+
+              if (url) return url;
             }
 
             // البحث في data attributes
             const dataHref = element.getAttribute('data-href') || 
                            element.getAttribute('data-url') ||
                            element.getAttribute('data-link');
-            if (dataHref && dataHref.includes('http')) {
-              return dataHref;
-            }
+            if (dataHref) return dataHref;
           }
         }
         return null;
       });
     }
 
-    if (downloadUrl) {
-      return {
-        downloadUrl,
-        attempts,
-        totalWaitTime
-      };
-    }
-
-    return null;
-
+    return downloadUrl;
   } catch (err) {
-    console.log('❌ Browser error:', err.message);
     return null;
   } finally {
-    if (browser) {
-      await browser.close();
-      console.log('🔚 Browser closed');
-    }
+    if (browser) await browser.close();
   }
 }
 
-// استخدم index.html الموجود في public folder
 app.get("/", (req, res) => {
   res.sendFile(join(__dirname, "public", "index.html"));
 });
 
-// نقطة الصحة
-app.get("/health", (req, res) => {
-  res.json({ 
-    status: "healthy", 
-    timestamp: new Date().toISOString(),
-    visitors: visitorCache.size,
-    uptime: process.uptime()
-  });
-});
-
-// تشغيل السيرفر
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server started on port ${PORT}`);
-  console.log(`📧 Telegram Notifications: ${TELEGRAM_BOT_TOKEN ? '✅ Enabled' : '❌ Disabled'}`);
-  console.log(`🌐 Supported sites: ${Object.keys(sites).join(', ')}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📖 Main page: http://localhost:${PORT}/\n`);
-});
+app.listen(PORT, () => console.log(`🚀 Server started on port ${PORT}`));
